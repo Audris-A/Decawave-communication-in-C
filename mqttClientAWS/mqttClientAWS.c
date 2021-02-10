@@ -1,7 +1,6 @@
 /*
  *  README:
  *    TODO: Add logging and possible error identification
- *          Add config update funcionality
  *
  * */
 
@@ -13,8 +12,6 @@
 #include <mongoc/mongoc.h>
 #include "mqttClientAWS.h"
 #include <time.h>
-
-#define ADDRESS_SUB getenv("server")
 
 struct messageContent_t {
     char message[1024];
@@ -66,6 +63,10 @@ void sendDataToDatabase(bson_t *b, char * messageType)
         BSON_APPEND_UTF8(b, "tagId", messageContent.nodeId);
         BSON_APPEND_UTF8(b, "anchorId", messageContent.anchorId);
         BSON_APPEND_INT32(b, "distance", messageContent.distance);
+    }
+    else if (!strcmp(messageType, "config"))
+    {
+        BSON_APPEND_UTF8 (b, "active", "true");
     }
     else
     {
@@ -149,85 +150,193 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     	}
         else if (j == 5)
 	{
-	    if (!strcmp(token, "location")) 
-	    {
-		collection = mongoc_database_get_collection (database, LOCATION_COLLECTION);
-	    }
-	    else if (!strcmp(token, "config")) 
-	    {
-		collection = mongoc_database_get_collection (database, CONFIG_COLLECTION);
-	    }
-	    else if (!strcmp(token, "data")) 
-	    {
-		collection = mongoc_database_get_collection (database, DISTANCE_COLLECTION);
-		
-		// Insert distance values after the formating
-		char * base64String;
-		size_t baseOutLen;
-		bson_iter_t iter;
+            if (!strcmp(token, "location")) 
+            {
+                collection = mongoc_database_get_collection (database, LOCATION_COLLECTION);
+            }
+            else if (!strcmp(token, "config")) 
+            {
+                collection = mongoc_database_get_collection (database, CONFIG_COLLECTION);
+            }
+            else if (!strcmp(token, "data")) 
+            {
+                collection = mongoc_database_get_collection (database, DISTANCE_COLLECTION);
+            
+                // Insert distance values after the formating
+                char * base64String;
+                size_t baseOutLen;
+                bson_iter_t iter;
+                const bson_value_t *value;
+                
+                if (bson_iter_init(&iter, b)) 
+                {
+                    while (bson_iter_next(&iter)) {
+                        value = bson_iter_value (&iter);
+
+                        if (!strcmp(bson_iter_key(&iter), "data"))
+                        {
+                            base64String = value->value.v_utf8.str;
+                            break;
+                        }	
+                    }
+                }
+                
+                size_t baseLen = strlen(base64String);
+                
+                unsigned char *decodedString = base64_decode((const unsigned char*) base64String, baseLen, baseOutLen);
+                    
+                int anchorCount = decodedString[0];
+
+                int bytesCounter = 1;
+
+                if (baseOutLen >= 34)
+                {   
+                    int i;
+                    for (i = 0; i < anchorCount; i++)
+                    {
+                        int anchorHexId = (decodedString[bytesCounter + 0] & 0xff) | 
+                                  ((decodedString[bytesCounter + 1]& 0xff) & 0x000000FF) << 8;
+                        char anchorId[5];
+                        sprintf(anchorId,"%x", anchorHexId);
+                        u_int16_t distance = (decodedString[bytesCounter + 2]& 0xff) | 
+                                ((decodedString[bytesCounter + 3]& 0xff) & 0x000000FF) << 8 | 
+                                ((decodedString[bytesCounter + 4]& 0xff) & 0x000000FF) << 16 | 
+                                ((decodedString[bytesCounter + 5]& 0xff) & 0x000000FF) << 24;
+
+                        bytesCounter = bytesCounter + 4;
+                            
+                        strcpy(messageContent.anchorId, anchorId);
+                        messageContent.distance = distance;
+                            
+                        bson_t bsonObj;
+                        bson_init(&bsonObj);	    
+                            
+                        sendDataToDatabase(&bsonObj, token);
+                        bson_destroy(&bsonObj);
+                    }
+                }
+            }
+            else if (!strcmp(token, "status")) 
+            {
+                
+		// Update config message if status comes back false
+		//
+		//
+                    
+                bool isNodePresent;
+                bson_iter_t iter;
                 const bson_value_t *value;
 		
 		if (bson_iter_init(&iter, b)) 
-	        {
-	            while (bson_iter_next(&iter)) {
-			value = bson_iter_value (&iter);
+                {
+                    while (bson_iter_next(&iter)) {
+                        value = bson_iter_value (&iter);
 
-		        if (!strcmp(bson_iter_key(&iter), "data"))
+                        if (!strcmp(bson_iter_key(&iter), "present"))
+                        {
+                            isNodePresent = value->value.v_bool;
+                        }	
+                    }
+                }
+
+                if (!isNodePresent)
+                {
+		    printf("in node is not present if\n");
+                    collection = mongoc_database_get_collection (database, CONFIG_COLLECTION);
+                    
+		    const bson_t *docToUpdate;
+                    bson_t * filter = bson_new();
+                    bson_t * update;
+                    bson_t * query = bson_new();
+                    bson_error_t error;
+                    mongoc_cursor_t *cursor;
+                    char configTypeNodeId[7] = {'D', 'W'};
+                    strcat(configTypeNodeId, messageContent.nodeId);
+                    configTypeNodeId[6] = '\0';
+                    
+		    int i = 0;
+		    for (i = 0; configTypeNodeId[i]!='\0'; i++) {
+		        if(configTypeNodeId[i] >= 'a' && configTypeNodeId[i] <= 'z') {
+			    configTypeNodeId[i] = configTypeNodeId[i] - 32;
+		        }
+		    }
+
+                    printf("new node id = %s\n", configTypeNodeId);
+                    BSON_APPEND_UTF8 (filter, "active", "true");
+
+                    query = BCON_NEW("sort", "{",
+					          "timestamp", BCON_INT32(-1),
+				 	     "}");
+
+                    cursor = mongoc_collection_find_with_opts (collection, filter, query, NULL);
+                    
+                    if (mongoc_cursor_next (cursor, &docToUpdate)) {
+                        // Work with the docToUpdate which is the last config of configTypeNodeId
+                        //   with "active": "true"
+                        
+			printf("working with cursor\n");
+			
+			bson_oid_t oid;
+			bson_oid_init (&oid, NULL);
+			
+			if (bson_iter_init(&iter, docToUpdate)) 
 			{
-			    base64String = value->value.v_utf8.str;
-		            break;
-			}	
-		    }
-		}
-		
-		size_t baseLen = strlen(base64String);
-		
-		unsigned char *decodedString = base64_decode((const unsigned char*) base64String, baseLen, baseOutLen);
-		    
-		int anchorCount = decodedString[0];
+			    while (bson_iter_next(&iter)) {
+				value = bson_iter_value (&iter);
 
-		int bytesCounter = 1;
+				if (!strcmp(bson_iter_key(&iter), "_id"))
+				{
+				    char idVal[25];
+				    bson_oid_t *oldOid; 
+				    
+				    int k;
+				    for (k = 0; k < 12; k++) {
+                                        oldOid->bytes[k] = value->value.v_oid.bytes[k];
+					printf("byte = %u\n", value->value.v_oid.bytes[k]);
+				    }
+                                    
+				    bson_oid_to_string(oldOid, idVal);
 
-		if (baseOutLen >= 34)
-		{   
-		    int i;
-		    for (i = 0; i < anchorCount; i++)
-		    {
-		        int anchorHexId = (decodedString[bytesCounter + 0] & 0xff) | 
-				          ((decodedString[bytesCounter + 1]& 0xff) & 0x000000FF) << 8;
-	     	        char anchorId[5];
-			sprintf(anchorId,"%x", anchorHexId);
-			u_int16_t distance = (decodedString[bytesCounter + 2]& 0xff) | 
-					    ((decodedString[bytesCounter + 3]& 0xff) & 0x000000FF) << 8 | 
-					    ((decodedString[bytesCounter + 4]& 0xff) & 0x000000FF) << 16 | 
-					    ((decodedString[bytesCounter + 5]& 0xff) & 0x000000FF) << 24;
+				    bson_oid_init_from_string (&oid, idVal);    
+				    break;
+				}	
+			    }
+			}
 
-			bytesCounter = bytesCounter + 4;
-			    
-			strcpy(messageContent.anchorId, anchorId);
-			messageContent.distance = distance;
-			    
-			bson_t bsonObj;
-			bson_init(&bsonObj);	    
-			    
-			sendDataToDatabase(&bsonObj, token);
-			bson_destroy(&bsonObj);
-		    }
-		}
-		
+			printf("creating update query\n");
+                        query = BCON_NEW("_id", BCON_OID (&oid));
+                        update = BCON_NEW ("$set", "{",
+                                                       "active", BCON_UTF8("false"),
+                                                   "}");
+
+                        if (!mongoc_collection_update (collection, MONGOC_UPDATE_NONE, query, update, NULL, &error)) {
+                            fprintf (stderr, "%s\n", error.message);
+                            //goto fail;
+                        }
+			else 
+			{
+			    printf("Updated record\n");
+			}
+                    }
+                    
+		    bson_destroy (query);
+                    mongoc_cursor_destroy (cursor);
+                }
+                else 
+                {
+                    // log that didn't find any record?
+                }
+
+                collection = mongoc_database_get_collection (database, STATUS_COLLECTION);
+            }
+            
+	    if (strcmp(token, "data"))
+            {
+                sendDataToDatabase(b, token);
+                printf("Sending %s message\n", token);
 	    }
-	    else if (!strcmp(token, "status")) 
-	    {
-		collection = mongoc_database_get_collection (database, STATUS_COLLECTION);
-	    }
-
-	    
-	    if (!strcmp(token, "data"))
-	    {
-	        sendDataToDatabase(b, token);
-	    }
-	}	
-    }
+        }	
+    } 
      
     MQTTClient_freeMessage(&message);
     MQTTClient_free(topicName);
@@ -261,7 +370,7 @@ int main()
     MQTTClient_connectOptions conn_opts_sub = MQTTClient_connectOptions_initializer;
     MQTTClient_SSLOptions ssl_opts = MQTTClient_SSLOptions_initializer;
     
-    rc_sub = MQTTClient_create(&client_sub, ADDRESS_SUB, CLIENTID_SUB,
+    rc_sub = MQTTClient_create(&client_sub, getenv("server"), CLIENTID_SUB,
         MQTTCLIENT_PERSISTENCE_DEFAULT, NULL);
     
     if (!(rc_sub == MQTTCLIENT_SUCCESS))
@@ -284,7 +393,6 @@ int main()
     if ((rc_sub = MQTTClient_connect(client_sub, &conn_opts_sub)) != MQTTCLIENT_SUCCESS)
     {
         printf("Failed to connect, return code %d\n", rc_sub);
-	printf("URL = %s", ADDRESS_SUB);
         exit(EXIT_FAILURE);
     }
 

@@ -1,6 +1,6 @@
 # Sample Makefile
 
-TARGET := mqttClientRBPi
+TARGET := processLogData
 
 OBJ := $(TARGET).o
 
@@ -9,7 +9,7 @@ CFLAGS = -L/usr/local/lib -I/usr/local/include/libmongoc-1.0 -I/usr/local/includ
 
 CC := gcc
 
-DEPS := mqttClientRBPi.h
+DEPS := processLogData.h
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)

@@ -19,14 +19,14 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     gettimeofday(&time_now, NULL);
     int res = 0;
 
-    char dateTimeVal[50 + message->payloadlen];
+    char dateTimeVal[62 + message->payloadlen];
 
     char payloadText[message->payloadlen + 1];
 
     char* payloadptr;
     printf("Message arrived\n");
     printf("     topic: %s\n", topicName);
-    printf("   message: ");
+    printf("   message: \n");
 
     payloadptr = message->payload;
 
@@ -40,11 +40,32 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
 
-    sprintf(dateTimeVal, "%s^%d.%02d.%02d %02d:%02d:%02d:%06li^%s^%s^%s", payloadText, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, 
+    char *str1, *tokenValue;
+    char *saveptr1;
+    char tagId[10];
+    char messageType[100];
+    int j = 0;
+
+    for (j = 1, str1 = topicName; ; j++, str1 = NULL) {
+	    tokenValue = strtok_r(str1, "/", &saveptr1);
+
+	    if (tokenValue == NULL)
+		    break;
+	    
+	    printf("%s\n", tokenValue);
+	    
+	    switch(j){
+		    case 3: strcpy(tagId, tokenValue);
+		    case 5: strcpy(messageType, tokenValue);
+		    default: ; //
+	    }
+    }
+
+    sprintf(dateTimeVal, "%s^%d.%02d.%02d %02d:%02d:%02d:%06li^%s^%s^%s^%s^%s", payloadText, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, 
              tm.tm_hour,
              tm.tm_min,
              tm.tm_sec,
-             time_now.tv_usec, zoneId, panId, testCaseName);
+             time_now.tv_usec, &tagId, &messageType, zoneId, panId, testCaseName);
 
     printf("%s\n", dateTimeVal);
 
@@ -66,7 +87,7 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     MQTTClient_publishMessage(client_publisher, topicName, &pubmsg, &token);
     printf("Waiting for publication of %s\n"
             "on topic %s for client with ClientID: %s\n",
-            PAYLOAD, topicName, CLIENTID_PUB);
+            pubmsg.payload, topicName, CLIENTID_PUB);
 
     //res = MQTTClient_waitForCompletion(client_publisher, token, 20000L);
     

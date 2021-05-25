@@ -15,5 +15,5 @@ DEPS := processLogData.h
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 
-mqttClientRBPi: $(OBJ)
+processLogData: $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS)

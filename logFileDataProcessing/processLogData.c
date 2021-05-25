@@ -4,7 +4,7 @@
 #include "MQTTClient.h"
 #include <time.h>
 #include <ctype.h>
-#include "mqttClientRBPi.h"
+#include "processLogData.h"
 
 int main(int argc, char* argv[])
 {

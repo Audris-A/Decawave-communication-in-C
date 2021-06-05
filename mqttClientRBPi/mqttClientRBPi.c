@@ -44,8 +44,11 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     char *saveptr1;
     char tagId[10];
     char messageType[100];
+    char topicNameValue[200];
     int j = 0;
 
+    strcpy(topicNameValue, topicName);
+	
     for (j = 1, str1 = topicName; ; j++, str1 = NULL) {
 	    tokenValue = strtok_r(str1, "/", &saveptr1);
 
@@ -83,11 +86,11 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
     fclose(fp);
 
     //Send the message to the AWS cloud mqtt server
-    printf("Topic = %s", topicName);
-    MQTTClient_publishMessage(client_publisher, topicName, &pubmsg, &token);
+    printf("Topic = %s", topicNameValue);
+    MQTTClient_publishMessage(client_publisher, topicNameValue, &pubmsg, &token);
     printf("Waiting for publication of %s\n"
             "on topic %s for client with ClientID: %s\n",
-            pubmsg.payload, topicName, CLIENTID_PUB);
+            pubmsg.payload, topicNameValue, CLIENTID_PUB);
 
     //res = MQTTClient_waitForCompletion(client_publisher, token, 20000L);
     
